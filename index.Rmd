@@ -4,8 +4,6 @@ output:
   html_document:
     toc: yes
     number_sections: yes
-  html_notebook:
-    toc: yes
 ---
 
 <style type="text/css">

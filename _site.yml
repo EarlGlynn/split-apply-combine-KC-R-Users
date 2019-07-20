@@ -1,0 +1,4 @@
+name: "split-apply-combine"
+output_dir: "docs"
+navbar:
+  title: "split-apply-combine"
