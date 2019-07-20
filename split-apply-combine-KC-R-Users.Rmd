@@ -1,0 +1,257 @@
+---
+title: "split-apply-combine"
+output:
+  html_document:
+    toc: yes
+    number_sections: yes
+  html_notebook:
+    toc: yes
+---
+
+<style type="text/css">
+div#TOC li {
+    list-style:none;
+    background-image:none;
+    background-repeat:none;
+    background-position:0;
+}
+</style>
+
+Earl F Glynn | KC R Users Meetup | 2019-07-20
+
+# Setup
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+time.1 <- Sys.time()
+```
+
+```{r, comment = NA}
+library(tidyverse)
+library(kableExtra) # kable_styling
+```
+
+Helper function
+
+```{r}
+Show <- function(data, caption="", bigMark="", ...)
+{
+  data                                          %>%
+  kable("html",
+        caption=caption,
+        format.args = list(big.mark=bigMark))   %>%
+  kable_styling(bootstrap_options = c("striped", "bordered", "condensed"),
+                position = "left", full_width = FALSE, ...)
+}
+```
+
+# Background
+
+* torvaney's RStudio posting, [Apply function to dataframe in chunks](https://community.rstudio.com/t/apply-function-to-dataframe-in-chunks/9067).
+
+* [Split-Apply-Combine: My search for a replacement for 'group_by + do'](https://coolbutuseless.bitbucket.io/2018/03/03/split-apply-combine-my-search-for-a-replacement-for-group_by---do/).
+
+# Data to Explore:  `iris` data.frame
+
+Let's use the `iris` data.frame that has three groups of iris data.
+
+```{r, comment = NA}
+str(iris)
+```
+
+# dplyr summarize function
+
+```{r}
+iris                 %>%
+  group_by(Species)  %>%
+  summarize(                   # Also spelled `summarise`
+             n = n(), 
+             meanSepalLength = mean(Sepal.Length, na.rm = TRUE),
+             meanSepalWidth  = mean(Sepal.Width,  na.rm = TRUE),
+             meanPetalLength = mean(Petal.Length, na.rm = TRUE),
+             meanPetalWidth  = mean(Petal.Width,  na.rm = TRUE)
+           )        %>%
+  ungroup()         %>%
+  Show()
+```
+
+Functions used in `summarize` have to return a scalar value, not a vector or other object.
+
+What if a special function is needed to summarize/manipulate the data by groups?
+
+What if we want various quantiles of one of the variables for all groups and only want to call the `quantile` function once?
+
+How can we process group data with a result as another tibble?
+
+# Split-Apply-Combine - Pre-historic R method
+
+Pre-tidyverse approach
+
+## Split into list of groups
+
+```{r, comment = NA}
+splits <- split(iris, iris$Species)
+length(splits)
+```
+
+```{r, comment = NA}
+dim(splits[[1]])
+```
+
+```{r}
+splits[[1]] %>% head(2)  %>% Show()
+```
+
+## Write function that processes one of the groups
+
+Let's assume we want several stats for one of the columns 
+
+```{r}
+x <- splits[[1]]
+```
+
+Here `x` is a data.frame with all data for one group.
+
+Example quantiles
+
+```{r, comment = NA}
+quantile(x[, "Sepal.Length"], 
+         c(0.00, 0.05, 0.25, 0.50, 0.75, 0.95, 1.00))
+```
+
+Let's write a function that processes a data.frame `x` with the specific ``group` column`columnName`
+
+```{r}
+getStats <- function(x, columnName)
+{
+  xValue <- x[, columnName]
+  
+  Q <- quantile(xValue, 
+                c(0.00, 0.05, 0.25, 0.50,
+                  0.75, 0.95, 1.00),
+                na.rm = TRUE)
+  
+  tibble(
+    Species = x$Species[1],
+    n     = nrow(x),
+    
+    mean  = mean(xValue, na.rm = TRUE),
+    stdev = sd(xValue,   na.rm = TRUE),
+    
+    min  = Q[1],
+    Q005 = Q[2],
+    Q025 = Q[3],
+    median = Q[4],
+    Q075 = Q[5],
+    Q095 = Q[6],
+    max  = Q[7]
+  )
+}
+```
+
+Let's test the function
+
+**column name**
+
+```{r}
+getStats(x, "Sepal.Length") %>%
+  Show()
+```
+
+**column index**
+
+```{r}
+getStats(x, 1) %>%
+  Show()
+```
+
+## Apply to all groups
+
+```{r}
+groupResults <- do.call("rbind", lapply(splits, 
+                                        function(x)
+                                        {
+                                          getStats(x, "Sepal.Length")
+                                        }
+                                       )
+                       )
+nrow(groupResults)
+```
+
+```{r}
+groupResults %>% as_tibble() %>% Show()
+```
+
+# Split-Apply-Combine - tidyverse / base hybrid
+
+This hybrid approach uses `split` to create a list of data.frames, and then uses `map_dfr` to map a function over each data.frame and then combine (by rows) into a single data.frame.
+
+```{r}
+resultTbl1 <- 
+  iris              %>% 
+  split(.$Species)  %>%
+  purrr::map_dfr(getStats, "Sepal.Length")
+
+resultTbl1 %>% Show()
+```
+
+# Split-Apply-Combine - Curent era tidyverse
+
+Need new `getStats` function using `magrittr` pipe
+
+Use new "curly-curly" operator
+
+See [recent June 28 Tweet](https://twitter.com/_lionelhenry/status/1144506303932489728) by @_lionelhenry:
+
+> rlang 0.4.0 is out! Meet curly-curly, a new operator to make it easier to create #rstats functions around #tidyverse pipelines. [Blog post at](https://www.tidyverse.org/articles/2019/06/rlang-0-4-0/)  
+
+`xValue` here cannot be defined by indexing `x`, rather the specified column must be pulled in a tidy way.
+
+```{r}
+getStatsTidy <- function(x, columnName)
+{
+  xValue <- {{x}}   %>% 
+            pull({{columnName}})
+  
+  Q <- quantile(xValue, 
+                c(0.00, 0.05, 0.25, 0.50,
+                  0.75, 0.95, 1.00),
+                na.rm = TRUE)
+  
+  tibble(
+    n     = nrow(x),
+    
+    mean  = mean(xValue, na.rm = TRUE),
+    stdev = sd(xValue,   na.rm = TRUE),
+    
+    min  = Q[1],
+    Q005 = Q[2],
+    Q025 = Q[3],
+    median = Q[4],
+    Q075 = Q[5],
+    Q095 = Q[6],
+    max  = Q[7]
+  )
+}
+```
+
+```{r}
+resultTbl2 <- 
+  iris               %>% 
+  group_by(Species)  %>%
+  nest()             %>%
+  mutate( data = purrr::map(data, getStatsTidy, "Sepal.Length"))  %>%
+  unnest()
+
+resultTbl2 %>% Show()
+```
+
+```{r, echo=FALSE}
+time.2 <- Sys.time()
+processingTime <- paste("Processing time:", sprintf("%.1f",
+                        as.numeric(difftime(time.2,
+                                            time.1, units="secs"))), "secs\n")
+```
+
+`r processingTime`
+`r format(time.2, "%Y-%m-%d %H%M")`                                     
