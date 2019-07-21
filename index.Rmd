@@ -2,20 +2,12 @@
 title: "split-apply-combine"
 output:
   html_document:
+    css: styles.css
     toc: yes
     number_sections: yes
 ---
 
-<style type="text/css">
-div#TOC li {
-    list-style:none;
-    background-image:none;
-    background-repeat:none;
-    background-position:0;
-}
-</style>
-
-Earl F Glynn | KC R Users Meetup | 2019-07-20
+Earl F Glynn | KC R Users Meetup | 2019-07-20 | [Source](https://github.com/EarlGlynn/split-apply-combine-KC-R-Users)
 
 # Setup
 
